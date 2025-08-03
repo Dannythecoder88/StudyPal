@@ -1,121 +1,229 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+
+// Custom hook for using localStorage with useState
+function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T | ((val: T) => T)) => void] {
+  const [storedValue, setStoredValue] = useState<T>(() => {
+    if (typeof window === 'undefined') {
+      return initialValue;
+    }
+    try {
+      const item = window.localStorage.getItem(key);
+      return item ? JSON.parse(item) : initialValue;
+    } catch (error) {
+      console.log(error);
+      return initialValue;
+    }
+  });
+
+  const setValue = useCallback(
+    (value: T | ((val: T) => T)) => {
+      try {
+        setStoredValue(currentValue => {
+          const valueToStore = value instanceof Function ? value(currentValue) : value;
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(key, JSON.stringify(valueToStore));
+          }
+          return valueToStore;
+        });
+      } catch (error) {
+        console.log(error);
+      }
+    },
+    [key]
+  );
+
+  return [storedValue, setValue];
+}
 
 const BLOCK_MINUTES = 30;
 const SHORT_BREAK_MINUTES = 5;
 const LONG_BLOCK_MIN = 120;
 const LONG_BLOCK_MAX = 180;
 
-export default function SmartStudyTimer({ onStudyTime, onFocusScore, colorMode, title = 'Smart Study Timer' }: {
+// Helper to format seconds into MM:SS
+const formatTime = (seconds: number) => {
+  const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const secs = (seconds % 60).toString().padStart(2, '0');
+  return `${mins}:${secs}`;
+};
+
+export default function SmartStudyTimer({ 
+  onStudyTime,
+  onProgressUpdate,
+  onBlockProgressUpdate,
+  colorMode, 
+  title,
+  studyGoal
+}: {
   onStudyTime: (minutes: number) => void;
-  onFocusScore: (score: number) => void;
+  onProgressUpdate?: (seconds: number) => void;
+  onBlockProgressUpdate?: (seconds: number) => void;
   colorMode: 'light' | 'dark';
   title?: string;
+  studyGoal?: number; // in minutes
 }) {
-  const [isStudying, setIsStudying] = useState(false);
-  const [isOnBreak, setIsOnBreak] = useState(false);
-  const [blockMinutes, setBlockMinutes] = useState(BLOCK_MINUTES);
-  const [breakMinutes, setBreakMinutes] = useState(SHORT_BREAK_MINUTES);
-  const [elapsed, setElapsed] = useState(0);
-  const [blockElapsed, setBlockElapsed] = useState(0);
-  const [longBlockElapsed, setLongBlockElapsed] = useState(0);
-  const [focusStreak, setFocusStreak] = useState(0);
+  const [isStudying, setIsStudying] = useLocalStorage('focus-isStudying', false);
+  const [isOnBreak, setIsOnBreak] = useLocalStorage('focus-isOnBreak', false);
+  const [blockMinutes, setBlockMinutes] = useLocalStorage('focus-blockMinutes', BLOCK_MINUTES);
+  const [breakMinutes, setBreakMinutes] = useLocalStorage('focus-breakMinutes', SHORT_BREAK_MINUTES);
+  const [elapsed, setElapsed] = useLocalStorage('focus-elapsed-seconds', 0);
+  const [blockElapsed, setBlockElapsed] = useLocalStorage('focus-blockElapsed-seconds', 0);
+  const [longBlockElapsed, setLongBlockElapsed] = useLocalStorage('focus-longBlockElapsed-seconds', 0);
   const [showBreakNow, setShowBreakNow] = useState(false);
-  const [customBreak, setCustomBreak] = useState(1);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [customBreak, setCustomBreak] = useState(5);
   const [showLongBreakMsg, setShowLongBreakMsg] = useState(false);
+  const [goalMet, setGoalMet] = useLocalStorage('focus-goalMet', false);
+  const [isHydrated, setIsHydrated] = useState(false);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Start/stop timer
+  // Handle hydration
   useEffect(() => {
-    if (isStudying && !isOnBreak && !showLongBreakMsg) {
-      intervalRef.current = setInterval(() => {
-        setElapsed(e => e + 1);
-        setBlockElapsed(b => b + 1);
-        setLongBlockElapsed(l => l + 1);
-        // Focus streak logic: every 10 min uninterrupted study, +10%
-        setFocusStreak(s => {
-          if ((blockElapsed + 1) % 10 === 0) {
-            const newScore = Math.min(s + 10, 100);
-            onFocusScore(newScore);
-            return newScore;
+    setIsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (isStudying && !showLongBreakMsg) {
+      const interval = setInterval(() => {
+        setElapsed(prev => {
+          const newElapsed = prev + 1;
+          if (onProgressUpdate) {
+            onProgressUpdate(newElapsed);
           }
-          return s;
+          return newElapsed;
         });
-        // Update parent on study time
-        onStudyTime(elapsed + 1);
-      }, 1000 * 60);
+        setBlockElapsed(prev => {
+          const newBlockElapsed = prev + 1;
+          if (onBlockProgressUpdate) {
+            onBlockProgressUpdate(newBlockElapsed);
+          }
+          return newBlockElapsed;
+        });
+        setLongBlockElapsed(prev => prev + 1);
+      }, 1000);
+      intervalRef.current = interval;
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
     }
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-    // Only depend on isStudying, isOnBreak, showLongBreakMsg
-  }, [isStudying, isOnBreak, showLongBreakMsg]);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [isStudying, showLongBreakMsg, setElapsed, setBlockElapsed, setLongBlockElapsed, onProgressUpdate, onBlockProgressUpdate]);
+
+  // Handle parent updates - track minutes more reliably
+  const lastMinuteRef = useRef(0);
+  useEffect(() => {
+    const currentMinute = Math.floor(elapsed / 60);
+    if (currentMinute > lastMinuteRef.current && elapsed > 0) {
+      const minutesStudied = currentMinute - lastMinuteRef.current;
+      console.log(`Study time update: ${minutesStudied} minutes (total elapsed: ${elapsed}s)`);
+      onStudyTime(minutesStudied);
+      lastMinuteRef.current = currentMinute;
+    }
+  }, [elapsed, onStudyTime]);
 
   // Handle block/break transitions
   useEffect(() => {
-    if (!isStudying) return;
-    if (!isOnBreak && blockElapsed >= blockMinutes) {
-      setIsOnBreak(true);
-      setBlockElapsed(0);
-      setFocusStreak(0);
-      onFocusScore(0);
+    if (!isStudying || goalMet) return;
+
+    const goalInSeconds = (studyGoal || 0) * 60;
+    if (studyGoal && studyGoal > 0) {
+      // Goal-oriented session logic
+      if (elapsed >= goalInSeconds) {
+        setGoalMet(true);
+        setIsStudying(false);
+        return;
+      }
+
+      const currentBlockMinutes = 30;
+      const currentBreakMinutes = 5;
+
+      // Study block finished
+      if (!isOnBreak && blockElapsed >= currentBlockMinutes * 60) {
+        setIsOnBreak(true);
+        setBlockElapsed(0);
+        setBreakMinutes(currentBreakMinutes);
+        return;
+      }
+
+      // Break finished
+      if (isOnBreak && blockElapsed >= currentBreakMinutes * 60) {
+        setIsOnBreak(false);
+        setBlockElapsed(0);
+        setBlockMinutes(currentBlockMinutes);
+      }
+    } else {
+      // Original logic for non-goal sessions
+      if (!isOnBreak && blockElapsed >= blockMinutes * 60) {
+        setIsOnBreak(true);
+        setBlockElapsed(0);
+        return;
+      }
+
+      if (isOnBreak && blockElapsed >= breakMinutes * 60) {
+        setIsOnBreak(false);
+        setBlockElapsed(0);
+        setBlockMinutes(BLOCK_MINUTES);
+        setBreakMinutes(SHORT_BREAK_MINUTES);
+      }
+
+      if (!isOnBreak && longBlockElapsed >= LONG_BLOCK_MIN * 60 && longBlockElapsed <= LONG_BLOCK_MAX * 60) {
+        setShowLongBreakMsg(true);
+        setIsStudying(false);
+      }
     }
-    if (isOnBreak && blockElapsed >= breakMinutes) {
-      setIsOnBreak(false);
-      setBlockElapsed(0);
-      setBlockMinutes(BLOCK_MINUTES);
-      setBreakMinutes(SHORT_BREAK_MINUTES);
-    }
-    // Long break after 2-3 hours
-    if (!isOnBreak && longBlockElapsed >= LONG_BLOCK_MIN && longBlockElapsed <= LONG_BLOCK_MAX) {
-      setShowLongBreakMsg(true);
-      setIsStudying(false);
-    }
-  }, [blockElapsed, isOnBreak, isStudying, longBlockElapsed, blockMinutes, breakMinutes, onFocusScore]);
+  }, [
+    isStudying, elapsed, blockElapsed, isOnBreak, studyGoal, goalMet, blockMinutes, breakMinutes, longBlockElapsed,
+    setGoalMet, setIsStudying, setIsOnBreak, setBlockElapsed, setBlockMinutes, setBreakMinutes, setShowLongBreakMsg
+  ]);
 
   // Manual break
+  const handleStartStop = () => {
+    setIsStudying(prev => !prev);
+  };
+
   const handleBreakNow = () => {
-    setShowBreakNow(false);
     setIsOnBreak(true);
-    setBlockElapsed(0);
+    setBlockElapsed(0); // Reset block timer for the break
     setBreakMinutes(customBreak);
-    setBlockMinutes(BLOCK_MINUTES + customBreak);
-    setFocusStreak(0);
-    onFocusScore(0);
+    setShowBreakNow(false);
   };
 
-  // Reset all
   const handleReset = () => {
-    setIsStudying(false);
-    setIsOnBreak(false);
-    setElapsed(0);
+    // Reset only the current session timer, not overall progress
     setBlockElapsed(0);
-    setLongBlockElapsed(0);
-    setFocusStreak(0);
-    setShowLongBreakMsg(false);
-    onFocusScore(0);
+    setBlockMinutes(BLOCK_MINUTES); // Reset to 30 minutes
+    setIsOnBreak(false);
+    setIsStudying(false);
+    console.log('Focus session timer reset to 30 minutes');
   };
 
-  // Progress bar calculation
-  const progress = isOnBreak
-    ? Math.min(blockElapsed / breakMinutes, 1)
-    : Math.min(blockElapsed / blockMinutes, 1);
+  // Timer and progress bar calculation
+  const totalDuration = (isOnBreak ? breakMinutes : blockMinutes) * 60;
+  const remainingTime = totalDuration - blockElapsed;
+  const progress = totalDuration > 0 ? Math.min(blockElapsed / totalDuration, 1) : 0;
 
   return (
-    <div className={`card ${colorMode === 'dark' ? 'bg-gray-900 text-white' : ''}`}>
+    <div className="card">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold">{title}</h2>
+        <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
       </div>
-      {showLongBreakMsg ? (
+      {goalMet ? (
+        <div className="text-center py-8">
+          <div className="text-lg font-bold mb-2">Daily Goal Achieved!</div>
+          <div className="mb-4">Congratulations! You've completed your study goal of {Math.floor((studyGoal || 0) / 60)}h {(studyGoal || 0) % 60}m.</div>
+          <button className="btn-primary" onClick={() => { setGoalMet(false); setElapsed(0); }}>Start a New Goal</button>
+        </div>
+      ) : showLongBreakMsg ? (
         <div className="text-center py-8">
           <div className="text-lg font-bold mb-2">Great work!</div>
           <div className="mb-4">You’ve completed a long study block ({longBlockElapsed} min). Take a 1–2 hour break and come back refreshed for your next focus session!</div>
-          <button className="btn-primary" onClick={handleReset}>Start New Session</button>
+          <button className="btn-primary" onClick={() => window.location.reload()}>Start New Session</button>
         </div>
       ) : (
         <>
           <div className="text-center mb-6">
-            <div className="text-4xl font-bold mb-2">
-              {isOnBreak ? `${breakMinutes - blockElapsed} min` : `${blockMinutes - blockElapsed} min`}
+            <div className="text-4xl font-bold mb-2 text-gray-900">
+              {isHydrated ? formatTime(remainingTime) : formatTime((isOnBreak ? breakMinutes : blockMinutes) * 60)}
             </div>
             <div className={`text-sm font-medium ${isOnBreak ? 'text-pink-600' : 'text-primary-600'}`}>{isOnBreak ? 'Break Time' : 'Study Time'}</div>
             <div className="mt-2">
@@ -129,27 +237,15 @@ export default function SmartStudyTimer({ onStudyTime, onFocusScore, colorMode, 
               />
             </div>
           </div>
-          <div className="flex justify-center space-x-3 mb-4">
-            {!isStudying ? (
-              <button className="btn-primary" onClick={() => { setIsStudying(true); setIsOnBreak(false); }}>
-                Start
-              </button>
-            ) : (
-              <button className="btn-secondary" onClick={() => setIsStudying(false)}>
-                Pause
-              </button>
-            )}
-            <button className="btn-secondary" onClick={handleReset}>Reset</button>
-            <button className="btn-secondary" onClick={() => setShowBreakNow(true)} disabled={isOnBreak || !isStudying}>Break Now</button>
+          <div className="flex justify-center space-x-4">
+            <button className="btn-primary" onClick={handleStartStop}>{isStudying ? 'Pause' : 'Start'}</button>
+            <button className="btn-secondary" onClick={handleBreakNow} disabled={!isStudying || isOnBreak}>
+              Break
+            </button>
+            <button className="btn-secondary" onClick={handleReset}>
+              Reset
+            </button>
           </div>
-          {showBreakNow && (
-            <div className="mb-4 text-center">
-              <div className="mb-2">Select break length (1–10 min):</div>
-              <input type="range" min={1} max={10} value={customBreak} onChange={e => setCustomBreak(Number(e.target.value))} />
-              <span className="ml-2 font-bold">{customBreak} min</span>
-              <button className="btn-primary ml-4" onClick={handleBreakNow}>Start Break</button>
-            </div>
-          )}
         </>
       )}
     </div>

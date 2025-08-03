@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Lightbulb, RefreshCw } from 'lucide-react';
 
 const STUDY_TIPS = [
@@ -60,8 +60,12 @@ function getRandomTips(n: number) {
 }
 
 export default function Recommendations() {
-  const [tips, setTips] = useState(() => getRandomTips(3));
+  const [tips, setTips] = useState<{ title: string; description: string; }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    setTips(getRandomTips(3));
+  }, []);
 
   const regenerate = () => {
     setIsLoading(true);
