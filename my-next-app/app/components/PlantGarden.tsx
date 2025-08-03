@@ -7,17 +7,18 @@ interface PlantGardenProps {
   isOpen: boolean;
   onClose: () => void;
   studyTimeMinutes: number;
+  plantData: PlantData;
+  onUpdatePlant: (newPlantData: PlantData) => void;
 }
 
-type PlantStage = 'seedling' | 'sprout' | 'tree' | 'full-tree';
+export type PlantStage = 'seedling' | 'sprout' | 'tree' | 'full-tree';
 
-interface PlantData {
+export interface PlantData {
   name: string;
   stage: PlantStage;
 }
 
-export default function PlantGarden({ isOpen, onClose, studyTimeMinutes }: PlantGardenProps) {
-  const [plantData, setPlantData] = useState<PlantData>({ name: 'My Plant', stage: 'seedling' });
+export default function PlantGarden({ isOpen, onClose, studyTimeMinutes, plantData, onUpdatePlant }: PlantGardenProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [tempName, setTempName] = useState('');
 
@@ -29,33 +30,14 @@ export default function PlantGarden({ isOpen, onClose, studyTimeMinutes }: Plant
     return 'seedling';
   };
 
-  // Load plant data from localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const savedPlant = localStorage.getItem('studypal-plant');
-      if (savedPlant) {
-        try {
-          const parsed = JSON.parse(savedPlant);
-          setPlantData(parsed);
-        } catch (error) {
-          console.error('Error loading plant data:', error);
-        }
-      }
-    }
-  }, []);
-
-  // Update plant stage based on study time and save to localStorage
+  // Update plant stage based on study time
   useEffect(() => {
     const newStage = getPlantStage(studyTimeMinutes);
     if (newStage !== plantData.stage) {
       const updatedPlant = { ...plantData, stage: newStage };
-      setPlantData(updatedPlant);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('studypal-plant', JSON.stringify(updatedPlant));
-        console.log(`Plant evolved to ${newStage}! (${studyTimeMinutes} minutes studied)`);
-      }
+      onUpdatePlant(updatedPlant);
     }
-  }, [studyTimeMinutes, plantData.stage, plantData.name]);
+  }, [studyTimeMinutes, plantData, onUpdatePlant]);
 
   const handleNameEdit = () => {
     setTempName(plantData.name);
@@ -65,10 +47,7 @@ export default function PlantGarden({ isOpen, onClose, studyTimeMinutes }: Plant
   const handleNameSave = () => {
     if (tempName.trim()) {
       const updatedPlant = { ...plantData, name: tempName.trim() };
-      setPlantData(updatedPlant);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('studypal-plant', JSON.stringify(updatedPlant));
-      }
+      onUpdatePlant(updatedPlant);
     }
     setIsEditing(false);
   };

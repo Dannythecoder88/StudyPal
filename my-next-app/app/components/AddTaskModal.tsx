@@ -44,6 +44,7 @@ export default function AddTaskModal({ isOpen, onClose, onAddTask }: AddTaskModa
     
     if (!formData.dueDate) newErrors.dueDate = 'Due date is required';
     if (formData.estimatedTime <= 0) newErrors.estimatedTime = 'Estimated time must be greater than 0';
+    if (formData.estimatedTime >= 600) newErrors.estimatedTime = 'Estimated time must be less than 600 minutes';
 
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
@@ -232,12 +233,14 @@ export default function AddTaskModal({ isOpen, onClose, onAddTask }: AddTaskModa
             </label>
             <input
               type="number"
-              min="15"
-              step="15"
+              min="1"
+              max="599"
               value={formData.estimatedTime}
               onChange={(e) => handleInputChange('estimatedTime', parseInt(e.target.value))}
               className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent bg-white text-gray-900 ${errors.estimatedTime ? 'border-red-500' : ''}`}
+              placeholder="e.g., 45"
             />
+            <p className="text-xs text-gray-500 mt-1">Enter any time from 1 to 599 minutes</p>
             {errors.estimatedTime && (
               <p className="text-red-500 text-sm mt-1 flex items-center">
                 <AlertTriangle className="h-3 w-3 mr-1" />

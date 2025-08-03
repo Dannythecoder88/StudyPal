@@ -83,31 +83,31 @@ export default function SmartStudyTimer({
 
   useEffect(() => {
     if (isStudying && !showLongBreakMsg) {
-      const interval = setInterval(() => {
-        setElapsed(prev => {
-          const newElapsed = prev + 1;
-          if (onProgressUpdate) {
-            onProgressUpdate(newElapsed);
-          }
-          return newElapsed;
-        });
-        setBlockElapsed(prev => {
-          const newBlockElapsed = prev + 1;
-          if (onBlockProgressUpdate) {
-            onBlockProgressUpdate(newBlockElapsed);
-          }
-          return newBlockElapsed;
-        });
+      intervalRef.current = setInterval(() => {
+        setElapsed(prev => prev + 1);
+        setBlockElapsed(prev => prev + 1);
         setLongBlockElapsed(prev => prev + 1);
       }, 1000);
-      intervalRef.current = interval;
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isStudying, showLongBreakMsg, setElapsed, setBlockElapsed, setLongBlockElapsed, onProgressUpdate, onBlockProgressUpdate]);
+  }, [isStudying, showLongBreakMsg]);
+
+  // Effect to call parent update functions when elapsed time changes
+  useEffect(() => {
+    if (onProgressUpdate) {
+      onProgressUpdate(elapsed);
+    }
+  }, [elapsed, onProgressUpdate]);
+
+  useEffect(() => {
+    if (onBlockProgressUpdate) {
+      onBlockProgressUpdate(blockElapsed);
+    }
+  }, [blockElapsed, onBlockProgressUpdate]);
 
   // Handle parent updates - track minutes more reliably
   const lastMinuteRef = useRef(0);
