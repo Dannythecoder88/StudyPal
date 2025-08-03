@@ -41,33 +41,6 @@ export default function AIChat({
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const quickActions = [
-    { 
-      label: 'Explain a concept', 
-      icon: BookOpen, 
-      type: 'explanation',
-      placeholder: 'What concept would you like me to explain?'
-    },
-    { 
-      label: 'Study tips', 
-      icon: Lightbulb, 
-      type: 'study_tip',
-      placeholder: 'What subject or topic do you need tips for?'
-    },
-    { 
-      label: 'Motivation', 
-      icon: Heart, 
-      type: 'motivation',
-      placeholder: 'What\'s challenging you right now?'
-    },
-    { 
-      label: 'Schedule help', 
-      icon: Target, 
-      type: 'schedule_help',
-      placeholder: 'What scheduling issue are you facing?'
-    }
-  ];
-
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -80,14 +53,14 @@ export default function AIChat({
     console.log('Input message state changed:', inputMessage);
   }, [inputMessage]);
 
-  const sendMessage = async (content: string, type: string = 'general') => {
+  const sendMessage = async (content: string) => {
     if (!content.trim()) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
       content,
       sender: 'user',
-      type: type as any,
+      type: 'general',
       timestamp: new Date()
     };
 
@@ -103,7 +76,7 @@ export default function AIChat({
         },
         body: JSON.stringify({
           message: content,
-          type,
+          type: 'general',
           context: {
             subject: currentSubject,
             currentTask,
@@ -119,7 +92,7 @@ export default function AIChat({
           id: (Date.now() + 1).toString(),
           content: data.response,
           sender: 'ai',
-          type,
+          type: 'general',
           timestamp: new Date()
         };
         setMessages(prev => [...prev, aiMessage]);
@@ -139,10 +112,6 @@ export default function AIChat({
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleQuickAction = (action: typeof quickActions[0]) => {
-    setInputMessage(action.placeholder);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -170,23 +139,6 @@ export default function AIChat({
           >
             <X className="h-5 w-5" />
           </button>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="p-4 border-b bg-gray-50">
-          <h3 className="text-sm font-medium text-gray-700 mb-3">Quick Actions:</h3>
-          <div className="grid grid-cols-2 gap-2">
-            {quickActions.map((action) => (
-              <button
-                key={action.type}
-                onClick={() => handleQuickAction(action)}
-                className="flex items-center space-x-2 p-2 text-sm bg-white rounded-lg border hover:bg-gray-50 transition-colors"
-              >
-                <action.icon className="h-4 w-4 text-primary-600" />
-                <span>{action.label}</span>
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Messages */}

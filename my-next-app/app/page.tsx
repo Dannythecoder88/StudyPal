@@ -14,13 +14,15 @@ import {
   CheckCircle,
   AlertCircle,
   Bot,
-  Settings
+  Settings,
+  Sprout
 } from 'lucide-react';
 import AddTaskModal from './components/AddTaskModal';
 import AIChat from './components/AIChat';
 import Recommendations from './components/AIRecommendations';
 import SettingsModal from './components/SettingsModal';
 import SmartStudyTimer from './components/FocusSession';
+import PlantGarden from './components/PlantGarden';
 
 interface Task {
   id: number;
@@ -61,6 +63,7 @@ export default function StudyPal() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAIChatOpen, setIsAIChatOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isPlantGardenOpen, setIsPlantGardenOpen] = useState(false);
   const [colorMode, setColorMode] = useState<'light' | 'dark'>('light');
   const [isHydrated, setIsHydrated] = useState(false);
 
@@ -294,6 +297,10 @@ export default function StudyPal() {
               <span className="text-2xl font-bold text-primary-700">StudyPal</span>
             </div>
             <div className="flex items-center space-x-4">
+              <button className="btn-secondary" onClick={() => setIsPlantGardenOpen(true)}>
+                <Sprout className="h-4 w-4 mr-2" />
+                Your Plant
+              </button>
               <button className="btn-secondary" onClick={() => setIsAIChatOpen(true)}>
                 <Bot className="h-4 w-4 mr-2" />
                 AI Assistant
@@ -515,6 +522,13 @@ export default function StudyPal() {
         currentTask={tasks.find(t => !t.completed)?.title}
         studyTime={studyStats.todayMinutes}
         focusScore={studyStats.focusScore}
+      />
+
+      {/* Plant Garden Modal */}
+      <PlantGarden
+        isOpen={isPlantGardenOpen}
+        onClose={() => setIsPlantGardenOpen(false)}
+        studyTimeMinutes={studyStats.todayMinutes}
       />
 
       {/* Settings Modal */}
