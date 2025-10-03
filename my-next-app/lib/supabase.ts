@@ -1,10 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 import { PlantData } from '../app/components/PlantGarden';
 
-const supabaseUrl = 'https://npcqtmuizskijkuexvdn.supabase.co'
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5wY3F0bXVpenNraWprdWV4dmRuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQyNDk2MDUsImV4cCI6MjA2OTgyNTYwNX0.UIfBvM1Gm6wqwAm3j6G-SXP2TzDMAjgj6VMBp1PReOg'
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_KEY!;
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabaseKey)
 
 // Test Supabase connection
 const testSupabaseConnection = async (): Promise<boolean> => {
@@ -60,6 +60,27 @@ export interface UserData {
   plantData: PlantData;
 }
 
+// Interface for historical weekly study data
+export interface WeeklyStudyRecord {
+  id?: string;
+  user_id: string;
+  week_start_date: string; // ISO date string for Monday of the week
+  year: number;
+  week_number: number; // 1-52/53
+  study_data: {
+    monday: number
+    tuesday: number
+    wednesday: number
+    thursday: number
+    friday: number
+    saturday: number
+    sunday: number
+  }
+  total_minutes: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // Default user data for new users
 const getDefaultUserData = (): UserData => ({
   tasks: [],
@@ -84,6 +105,25 @@ const getDefaultUserData = (): UserData => ({
     stage: 'seedling',
   }
 })
+
+// Utility functions for week calculations
+const getWeekStartDate = (date: Date): Date => {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+  return new Date(d.setDate(diff));
+};
+
+const getWeekNumber = (date: Date): number => {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return weekNo;
+};
+
+const formatWeekStartDate = (date: Date): string => {
+  return date.toISOString().split('T')[0];
+};
 
 // Save user data to Supabase
 export const saveUserData = async (userId: string, data: UserData) => {
@@ -229,3 +269,124 @@ export const loadUserData = async (userId: string): Promise<UserData> => {
     return fallbackData
   }
 }
+
+// Save weekly study data to Supabase
+export const saveWeeklyStudyData = async (userId: string, weeklyData: any): Promise<boolean> => {
+  try {
+    const now = new Date();
+    const weekStartDate = getWeekStartDate(now);
+    const year = now.getFullYear();
+    const weekNumber = getWeekNumber(now);
+    const weekStartDateString = formatWeekStartDate(weekStartDate);
+    
+    // Calculate total minutes for the week
+    const totalMinutes = Object.values(weeklyData).reduce((sum: number, minutes: any) => sum + (minutes || 0), 0);
+    
+    const weeklyRecord: WeeklyStudyRecord = {
+      user_id: userId,
+      week_start_date: weekStartDateString,
+      year,
+      week_number: weekNumber,
+      study_data: weeklyData,
+      total_minutes: totalMinutes,
+      updated_at: now.toISOString()
+    };
+    
+    console.log('📅 Saving weekly study data:', weeklyRecord);
+    
+    // Check if record already exists for this week
+    const { data: existingRecord, error: checkError } = await supabase
+      .from('weekly_study_stats')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('week_start_date', weekStartDateString)
+      .single();
+    
+    let result, error;
+    
+    if (existingRecord) {
+      // Update existing record
+      const updateResult = await supabase
+        .from('weekly_study_stats')
+        .update({
+          study_data: weeklyRecord.study_data,
+          total_minutes: weeklyRecord.total_minutes,
+          updated_at: weeklyRecord.updated_at
+        })
+        .eq('user_id', userId)
+        .eq('week_start_date', weekStartDateString)
+        .select();
+      
+      result = updateResult.data;
+      error = updateResult.error;
+    } else {
+      // Insert new record
+      const insertResult = await supabase
+        .from('weekly_study_stats')
+        .insert(weeklyRecord)
+        .select();
+      
+      result = insertResult.data;
+      error = insertResult.error;
+    }
+    
+    if (error) {
+      console.error('❌ Failed to save weekly study data:', error);
+      return false;
+    }
+    
+    console.log('✅ Weekly study data saved successfully:', result);
+    return true;
+    
+  } catch (error) {
+    console.error('❌ Exception saving weekly study data:', error);
+    return false;
+  }
+};
+
+// Get historical weekly study data for a user
+export const getWeeklyStudyHistory = async (userId: string, weeksBack: number = 12): Promise<WeeklyStudyRecord[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('weekly_study_stats')
+      .select('*')
+      .eq('user_id', userId)
+      .order('week_start_date', { ascending: false })
+      .limit(weeksBack);
+    
+    if (error) {
+      console.error('❌ Failed to fetch weekly study history:', error);
+      return [];
+    }
+    
+    console.log(`📊 Retrieved ${data?.length || 0} weeks of study history`);
+    return data || [];
+    
+  } catch (error) {
+    console.error('❌ Exception fetching weekly study history:', error);
+    return [];
+  }
+};
+
+// Get study data for a specific week
+export const getWeeklyStudyData = async (userId: string, weekStartDate: string): Promise<WeeklyStudyRecord | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('weekly_study_stats')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('week_start_date', weekStartDate)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') {
+      console.error('❌ Failed to fetch weekly study data:', error);
+      return null;
+    }
+    
+    return data || null;
+    
+  } catch (error) {
+    console.error('❌ Exception fetching weekly study data:', error);
+    return null;
+  }
+};

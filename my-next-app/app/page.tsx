@@ -16,7 +16,8 @@ import {
   Bot,
   Settings,
   Sprout,
-  Trash2
+  Trash2,
+  ExternalLink
 } from 'lucide-react';
 import AddTaskModal from './components/AddTaskModal';
 import AIChat from './components/AIChat';
@@ -25,7 +26,8 @@ import SettingsModal from './components/SettingsModal';
 import SmartStudyTimer from './components/FocusSession';
 import PlantGarden, { PlantData, PlantStage } from './components/PlantGarden';
 import AuthModal from './components/AuthModal';
-import { supabase, saveUserData, loadUserData, initializeUserData, UserData } from '../lib/supabase';
+import GoogleClassroomConnect from './components/GoogleClassroomConnect';
+import { supabase, saveUserData, loadUserData, initializeUserData, UserData, saveWeeklyStudyData, getWeeklyStudyHistory, WeeklyStudyRecord } from '../lib/supabase';
 
 interface Task {
   id: number;
@@ -69,10 +71,16 @@ export default function StudyPal() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPlantGardenOpen, setIsPlantGardenOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isGoogleClassroomOpen, setIsGoogleClassroomOpen] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [colorMode, setColorMode] = useState<'light' | 'dark'>('light');
   const [isHydrated, setIsHydrated] = useState(false);
   const [plantData, setPlantData] = useState<PlantData>(defaultPlantData);
+
+  // Historical weekly data state
+  const [weeklyHistory, setWeeklyHistory] = useState<WeeklyStudyRecord[]>([]);
+  const [currentWeekOffset, setCurrentWeekOffset] = useState(0); // 0 = current week, 1 = last week, etc.
+  const [isLoadingWeeklyData, setIsLoadingWeeklyData] = useState(false);
 
   // Utility functions for localStorage operations
   const saveToLocalStorage = (key: string, data: any) => {
@@ -188,6 +196,24 @@ export default function StudyPal() {
     }
   };
   
+  // Load weekly history data from Supabase
+  const loadWeeklyHistoryData = async (userId: string) => {
+    try {
+      setIsLoadingWeeklyData(true);
+      console.log('📊 Loading weekly history data for user:', userId);
+      
+      const history = await getWeeklyStudyHistory(userId, 12); // Get last 12 weeks
+      setWeeklyHistory(history);
+      
+      console.log(`✅ Loaded ${history.length} weeks of study history`);
+    } catch (error) {
+      console.error('❌ Failed to load weekly history:', error);
+      setWeeklyHistory([]);
+    } finally {
+      setIsLoadingWeeklyData(false);
+    }
+  };
+  
   const loadUserDataFromSupabase = async (userId: string) => {
     try {
       console.log('🔄 CRITICAL: Loading ALL user data for:', userId);
@@ -236,6 +262,9 @@ export default function StudyPal() {
       // Load plant data
       console.log('🌱 CRITICAL: Setting plant data:', userData.plantData);
       setPlantData(userData.plantData || defaultPlantData);
+      
+      // Load weekly history data
+      await loadWeeklyHistoryData(userId);
       
       console.log('✅ CRITICAL: ALL user data loaded successfully!');
       console.log('✅ Final state:', {
@@ -371,7 +400,19 @@ export default function StudyPal() {
     console.log('🔥 CRITICAL DEBUG: UserData object to sync:', JSON.stringify(userData, null, 2));
     
     const success = await saveUserData(user.id, userData);
-    console.log(' CRITICAL DEBUG: Sync result:', success ? 'SUCCESS' : 'FAILED');
+    console.log('🔥 CRITICAL DEBUG: Sync result:', success ? 'SUCCESS' : 'FAILED');
+    
+    // Also save current week's study data to weekly history table
+    if (success) {
+      console.log('📅 Saving current week study data to weekly history...');
+      const weeklySuccess = await saveWeeklyStudyData(user.id, weeklyStudyData);
+      console.log('📅 Weekly data save result:', weeklySuccess ? 'SUCCESS' : 'FAILED');
+      
+      // Reload weekly history to include the updated data
+      if (weeklySuccess) {
+        await loadWeeklyHistoryData(user.id);
+      }
+    }
   };
   
   // Sync data whenever ANY user data changes - CRITICAL for data persistence
@@ -609,6 +650,15 @@ export default function StudyPal() {
               <button className="btn-secondary" onClick={() => setIsSettingsOpen(true)}>
                 <Settings className="h-5 w-5" />
               </button>
+              {user && (
+                <button 
+                  className="btn-secondary" 
+                  onClick={() => setIsGoogleClassroomOpen(true)}
+                  title="Connect Google Classroom"
+                >
+                  <ExternalLink className="h-5 w-5" />
+                </button>
+              )}
               {user ? (
                 <>
                   <button 
@@ -795,47 +845,119 @@ export default function StudyPal() {
 
             {/* Weekly Overview */}
             <div className="card">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Weekly Overview</h2>
-              <div className="grid grid-cols-7 gap-2">
-                {[
-                  { day: 'monday', label: 'Mon' },
-                  { day: 'tuesday', label: 'Tue' },
-                  { day: 'wednesday', label: 'Wed' },
-                  { day: 'thursday', label: 'Thu' },
-                  { day: 'friday', label: 'Fri' },
-                  { day: 'saturday', label: 'Sat' },
-                  { day: 'sunday', label: 'Sun' }
-                ].map(({ day, label }) => {
-                  const isToday = new Date().toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase() === day;
-                  const studyMinutes = weeklyStudyData[day as keyof typeof weeklyStudyData];
-                  const maxHeight = Math.max(...Object.values(weeklyStudyData), 60); // At least 60px height
-                  const heightPercentage = maxHeight > 0 ? (studyMinutes / maxHeight) * 100 : 0;
-                  
-                  return (
-                    <div key={day} className="text-center">
-                      <div className={`text-sm font-medium mb-2 ${
-                        isToday ? 'text-primary-600 font-semibold' : 'text-gray-600'
-                      }`}>
-                        {label}
-                        {isToday && <span className="text-xs text-primary-500 block">Today</span>}
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-20 relative">
-                        <div 
-                          className={`rounded-full absolute bottom-0 w-full transition-all duration-1000 ${
-                            studyMinutes > 0 ? 'bg-primary-500' : 'bg-gray-300'
-                          }`}
-                          style={{ 
-                            height: `${Math.max(heightPercentage, 5)}%`,
-                          }}
-                        />
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        {studyMinutes}m
-                      </div>
-                    </div>
-                  );
-                })}
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold text-gray-900">Weekly Overview</h2>
+                {user && (
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => setCurrentWeekOffset(Math.min(currentWeekOffset + 1, weeklyHistory.length - 1))}
+                      disabled={currentWeekOffset >= weeklyHistory.length - 1 || isLoadingWeeklyData}
+                      className="p-1 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Previous week"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <span className="text-sm text-gray-600 min-w-[100px] text-center">
+                      {currentWeekOffset === 0 ? 'This Week' : 
+                       currentWeekOffset === 1 ? 'Last Week' : 
+                       `${currentWeekOffset} weeks ago`}
+                    </span>
+                    <button
+                      onClick={() => setCurrentWeekOffset(Math.max(currentWeekOffset - 1, 0))}
+                      disabled={currentWeekOffset <= 0 || isLoadingWeeklyData}
+                      className="p-1 rounded-full hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Next week"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
               </div>
+              
+              {isLoadingWeeklyData ? (
+                <div className="flex items-center justify-center h-32">
+                  <div className="text-gray-500">Loading weekly data...</div>
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-7 gap-2">
+                    {[
+                      { day: 'monday', label: 'Mon' },
+                      { day: 'tuesday', label: 'Tue' },
+                      { day: 'wednesday', label: 'Wed' },
+                      { day: 'thursday', label: 'Thu' },
+                      { day: 'friday', label: 'Fri' },
+                      { day: 'saturday', label: 'Sat' },
+                      { day: 'sunday', label: 'Sun' }
+                    ].map(({ day, label }) => {
+                      // Get data for the selected week
+                      let displayData = weeklyStudyData;
+                      if (user && currentWeekOffset > 0 && weeklyHistory[currentWeekOffset - 1]) {
+                        displayData = weeklyHistory[currentWeekOffset - 1].study_data;
+                      }
+                      
+                      const isToday = currentWeekOffset === 0 && new Date().toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase() === day;
+                      const studyMinutes = displayData[day as keyof typeof displayData] || 0;
+                      const maxHeight = Math.max(...Object.values(displayData), 60); // At least 60px height
+                      const heightPercentage = maxHeight > 0 ? (studyMinutes / maxHeight) * 100 : 0;
+                      
+                      return (
+                        <div key={day} className="text-center">
+                          <div className={`text-sm font-medium mb-2 ${
+                            isToday ? 'text-primary-600 font-semibold' : 'text-gray-600'
+                          }`}>
+                            {label}
+                            {isToday && <span className="text-xs text-primary-500 block">Today</span>}
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-20 relative">
+                            <div 
+                              className={`rounded-full absolute bottom-0 w-full transition-all duration-1000 ${
+                                studyMinutes > 0 ? 'bg-primary-500' : 'bg-gray-300'
+                              }`}
+                              style={{ 
+                                height: `${Math.max(heightPercentage, 5)}%`,
+                              }}
+                            />
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {studyMinutes}m
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  
+                  {/* Weekly Summary */}
+                  {user && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-gray-600">Total for this week:</span>
+                        <span className="font-semibold text-gray-900">
+                          {(() => {
+                            let displayData = weeklyStudyData;
+                            if (currentWeekOffset > 0 && weeklyHistory[currentWeekOffset - 1]) {
+                              displayData = weeklyHistory[currentWeekOffset - 1].study_data;
+                            }
+                            const total = Object.values(displayData).reduce((sum, minutes) => sum + (minutes || 0), 0);
+                            const hours = Math.floor(total / 60);
+                            const mins = total % 60;
+                            return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+                          })()} 
+                        </span>
+                      </div>
+                      {currentWeekOffset > 0 && weeklyHistory[currentWeekOffset - 1] && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          Week of {new Date(weeklyHistory[currentWeekOffset - 1].week_start_date).toLocaleDateString()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -856,6 +978,7 @@ export default function StudyPal() {
         currentTask={tasks.find(t => !t.completed)?.title}
         studyTime={studyStats.todayMinutes}
         focusScore={studyStats.focusScore}
+        userId={user?.id}
       />
 
       {/* Plant Garden Modal */}
@@ -876,6 +999,13 @@ export default function StudyPal() {
 
       {/* Settings Modal */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} colorMode={colorMode} setColorMode={setColorMode} />
+
+      {/* Google Classroom Connect Modal */}
+      <GoogleClassroomConnect
+        isOpen={isGoogleClassroomOpen}
+        onClose={() => setIsGoogleClassroomOpen(false)}
+        userId={user?.id || ''}
+      />
 
     </div>
   );
